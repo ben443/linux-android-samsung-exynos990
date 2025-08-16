@@ -1,55 +1,47 @@
-name: Z3S
+name: Build Android Kernel
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'arch/arm64/configs/exynos9830-z3s_defconfig'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'arch/arm64/configs/z3s.config'
   workflow_dispatch:
-    inputs:
-      force_build:
-        description: 'Force build even if exynos9830_defconfig is not modified (manual trigger)'
-        type: boolean
-        default: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Set up environment
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libarchive-tools ccache
+    - name: Set up Build Environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libncurses5-dev autoconf bison flex libssl-dev libelf-dev gcc-aarch64-linux-gnu
 
-      - name: Build Kernel
-        run: |
-          chmod +x ./build.sh
-          ./build.sh -m z3s -k y
+    - name: Build Kernel
+      run: |
+        export ARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        make exynos9830-z3s_defconfig
+        make ARCH=arm64 -j$(nproc)
 
-      - name: Find built zips
-        id: find_zips
-        run: |
-          ZIP_FILES=$(find . -type f -name "*.zip")
-          if [[ -z "$ZIP_FILES" ]]; then
-            echo "No ZIPs found! Exiting."
-            exit 1
-          fi
-          echo "ZIP_FILES<<EOF" >> $GITHUB_ENV
-          echo "$ZIP_FILES" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+    - name: Install modules
+      run: |
+        export ARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        make modules
+        make modules_install INSTALL_MOD_PATH=$GITHUB_WORKSPACE/modules
 
-      - name: Upload built kernels
-        uses: actions/upload-artifact@v4
-        with:
-          name: built-kernels
-          path: ${{ env.ZIP_FILES }}
+    - name: Prepare artifacts
+      run: |
+        mkdir -p artifacts
+        cp arch/arm64/boot/Image artifacts/
+        cp arch/arm64/boot/dts/exynos/*.dtb artifacts/ || true
+        cp -r modules/lib/modules artifacts/modules || true
+
+    - name: Upload kernel image, dtbs, and modules
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-artifacts
+        path: |
+          artifacts/Image
+          artifacts/*.dtb
+          artifacts/modules/
